@@ -36,6 +36,7 @@
             --radius-md: 16px;
             --radius-lg: 22px;
             --radius-xl: 28px;
+            --avatar-bg: #ffffff;
         }
 
         html.dark {
@@ -60,6 +61,7 @@
             --nav-bg: rgba(15,14,12,0.88);
             --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
             --shadow-md: 0 4px 16px rgba(0,0,0,0.28);
+            --avatar-bg: #2a2925;
         }
 
         body {
@@ -101,7 +103,7 @@
             border-radius: 12px;
             object-fit: cover;
             border: 1px solid var(--border);
-            background: var(--surface-2);
+            background: var(--avatar-bg);
         }
 
         .nav-logo-fallback {
@@ -124,10 +126,11 @@
         }
 
         .nav-sub {
-            font-size: 11px;
-            color: var(--text-secondary);
+            font-size: 15px;
+            color: var(--text-primary);
             margin-top: 1px;
-            font-weight: 400;
+            font-weight: 600;
+            letter-spacing: -0.01em;
         }
 
         .nav-actions {
@@ -219,7 +222,7 @@
             width: 30px;
             height: 30px;
             border-radius: 10px;
-            background: var(--user-bg);
+            background: var(--avatar-bg);
             flex-shrink: 0;
             display: flex;
             align-items: center;
@@ -518,7 +521,6 @@
         <div class="nav-brand">
             <img src="https://res.cloudinary.com/dyurfqm02/image/upload/v1782149273/%E0%B8%94%E0%B8%B5%E0%B9%84%E0%B8%8B%E0%B8%99%E0%B9%8C%E0%B8%97%E0%B8%B5%E0%B9%88%E0%B8%A2%E0%B8%B1%E0%B8%87%E0%B9%84%E0%B8%A1%E0%B9%88%E0%B9%84%E0%B8%94%E0%B9%89%E0%B8%95%E0%B8%B1%E0%B9%89%E0%B8%87%E0%B8%8A%E0%B8%B7%E0%B9%88%E0%B8%AD_d9aluf.png" alt="Logo" class="nav-logo" id="nav-logo-img">
             <div>
-                <div class="nav-title">AI Assistant</div>
                 <div class="nav-sub">โรงเรียนวัดดงเมือง (เข่งฟื้นราษฎร์อุปถัมภ์)</div>
             </div>
         </div>
@@ -573,6 +575,7 @@
         const charCount = document.getElementById('char-count');
         const scrollBtn = document.getElementById('scroll-btn');
         const LOGO_URL = 'https://res.cloudinary.com/dyurfqm02/image/upload/v1782149273/%E0%B8%94%E0%B8%B5%E0%B9%84%E0%B8%8B%E0%B8%99%E0%B9%8C%E0%B8%97%E0%B8%B5%E0%B9%88%E0%B8%A2%E0%B8%B1%E0%B8%87%E0%B9%84%E0%B8%A1%E0%B9%88%E0%B9%84%E0%B8%94%E0%B9%89%E0%B8%95%E0%B8%B1%E0%B9%89%E0%B8%87%E0%B8%8A%E0%B8%B7%E0%B9%88%E0%B8%AD_d9aluf.png';
+        const FALLBACK_LOGO_URL = 'https://res.cloudinary.com/dyurfqm02/image/upload/v1782211024/%E0%B8%A3%E0%B8%A3._fmaahp.png';
         let isLoading = false;
 
         /* DATE LABEL */
@@ -632,7 +635,7 @@
                 const img = document.createElement('img');
                 img.src = LOGO_URL;
                 img.alt = 'AI';
-                img.onerror = () => { avatar.textContent = '🤖'; avatar.style.fontSize = '16px'; };
+                img.onerror = () => { img.src = FALLBACK_LOGO_URL; img.onerror = null; };
                 avatar.appendChild(img);
                 row.appendChild(avatar);
             }
@@ -668,7 +671,7 @@
             const img = document.createElement('img');
             img.src = LOGO_URL;
             img.alt = '';
-            img.onerror = () => { avatar.textContent = '🤖'; avatar.style.fontSize = '16px'; };
+            img.onerror = () => { img.src = FALLBACK_LOGO_URL; img.onerror = null; };
             avatar.appendChild(img);
             row.appendChild(avatar);
 
