@@ -1,740 +1,309 @@
+<?php
+
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+require '../db.php';
+
+// 1. ตรวจสอบการล็อกอิน
+if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+    header("Location: cms_login_adminwdm.php");
+    exit();
+}
+
+// 2. ล็อกสิทธิ์เฉพาะ admin / superadmin (กัน role user เข้าถึง)
+$user_role = $_SESSION['role'] ?? '';
+if (!in_array($user_role, ['admin', 'superadmin'])) {
+    die("Access Denied: คุณไม่มีสิทธิ์จัดการระบบงานภายใน");
+}
+
+// 3. สร้าง CSRF Token ครั้งเดียว เพื่อใช้ทั้งกับ ฟอร์ม และ ปุ่มลบ
+$csrf_token = generate_csrf_token(); 
+
+$status = $_GET['status'] ?? '';
+$edit_id = isset($_GET['edit']) ? (int)$_GET['edit'] : 0;
+$edit_data = null;
+
+// 4. ดึงข้อมูลสำหรับแก้ไข (ปลอดภัยด้วย Prepared Statement)
+if ($edit_id > 0) {
+    $stmt = $conn->prepare("SELECT * FROM internal_systems WHERE id = ?");
+    $stmt->bind_param("i", $edit_id);
+    $stmt->execute();
+    $edit_data = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+}
+
+// 5. ระบบแบ่งหน้า (Pagination) ดึงข้อมูลทีละ 5 รายการ
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+if ($page < 1) $page = 1;
+$limit = 5; // แสดงผลหน้าละ 5 รายการ
+$offset = ($page - 1) * $limit;
+
+// นับจำนวนรายการทั้งหมด
+$total_res = $conn->query("SELECT COUNT(*) as total FROM internal_systems");
+$total_rows = $total_res->fetch_assoc()['total'];
+$total_pages = ceil($total_rows / $limit);
+if ($total_pages < 1) $total_pages = 1;
+if ($page > $total_pages) $page = $total_pages;
+
+// ดึงรายการระบบงานแบบจำกัดจำนวน (Prepared Statement เพื่อความปลอดภัย)
+$sys_stmt = $conn->prepare("SELECT * FROM internal_systems ORDER BY sort_order ASC, id DESC LIMIT ? OFFSET ?");
+$sys_stmt->bind_param("ii", $limit, $offset);
+$sys_stmt->execute();
+$sys_list = $sys_stmt->get_result();
+
+// 6. ดึงโลโก้โรงเรียน
+$logo_img = 'dmlogo.png';
+$logo_query = $conn->query("SELECT setting_value FROM site_settings WHERE setting_key = 'logo_image'");
+if ($logo_query && $logo_query->num_rows > 0) {
+    $logo_img = $logo_query->fetch_assoc()['setting_value'];
+}
+
+// 7. ตัวเลือกสีพาสเทล
+$color_options = [
+    'bg-blue-50 text-blue-600'       => 'Pastel Blue 🔵',
+    'bg-purple-50 text-purple-600'   => 'Pastel Purple 🔮',
+    'bg-emerald-50 text-emerald-600' => 'Pastel Green 🟢',
+    'bg-amber-50 text-amber-600'     => 'Pastel Yellow 🟡',
+    'bg-rose-50 text-red-600'        => 'Pastel Red 🔴',
+    'bg-indigo-50 text-indigo-600'   => 'Pastel Indigo 🟣'
+];
+?>
 <!DOCTYPE html>
-<html lang="th" class="light">
+<html lang="th">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WDMS AI Assistant</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=IBM+Plex+Mono&display=swap" rel="stylesheet">
+    <title>จัดการระบบงานภายใน - Admin Panel</title>
+    <link rel="icon" href="../assets/<?php echo htmlspecialchars($logo_img); ?>?v=<?php echo time(); ?>" type="image/png">
+    <link rel="stylesheet" href="../assets/css/style.css?v=<?php echo time(); ?>">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        :root {
-            --bg: #f5f4f0;
-            --surface: #ffffff;
-            --surface-2: #f0efe9;
-            --border: rgba(0,0,0,0.08);
-            --border-strong: rgba(0,0,0,0.14);
-            --text-primary: #1a1917;
-            --text-secondary: #6b6860;
-            --text-tertiary: #9c9a94;
-            --accent: #2563eb;
-            --accent-light: #eff6ff;
-            --accent-text: #1d4ed8;
-            --user-bg: #1a1917;
-            --user-text: #f5f4f0;
-            --bot-bg: #ffffff;
-            --bot-text: #1a1917;
-            --send-bg: #1a1917;
-            --send-text: #f5f4f0;
-            --send-hover: #2d2c29;
-            --nav-bg: rgba(245,244,240,0.88);
-            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-            --shadow-md: 0 4px 16px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04);
-            --radius-sm: 10px;
-            --radius-md: 16px;
-            --radius-lg: 22px;
-            --radius-xl: 28px;
-            --avatar-bg: #ffffff;
-        }
-
-        html.dark {
-            --bg: #0f0e0c;
-            --surface: #1c1b18;
-            --surface-2: #252420;
-            --border: rgba(255,255,255,0.07);
-            --border-strong: rgba(255,255,255,0.12);
-            --text-primary: #f0efe9;
-            --text-secondary: #948f85;
-            --text-tertiary: #5c5952;
-            --accent: #3b82f6;
-            --accent-light: rgba(59,130,246,0.12);
-            --accent-text: #93c5fd;
-            --user-bg: #f0efe9;
-            --user-text: #1a1917;
-            --bot-bg: #1c1b18;
-            --bot-text: #f0efe9;
-            --send-bg: #f0efe9;
-            --send-text: #1a1917;
-            --send-hover: #dddcd5;
-            --nav-bg: rgba(15,14,12,0.88);
-            --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
-            --shadow-md: 0 4px 16px rgba(0,0,0,0.28);
-            --avatar-bg: #2a2925;
-        }
-
-        body {
-            font-family: 'IBM Plex Sans Thai', -apple-system, sans-serif;
-            background: var(--bg);
-            color: var(--text-primary);
-            height: 100dvh;
-            display: flex;
-            flex-direction: column;
-            transition: background 0.25s, color 0.25s;
-            overflow: hidden;
-        }
-
-        /* NAV */
-        nav {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 14px 20px;
-            background: var(--nav-bg);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border-bottom: 1px solid var(--border);
-            flex-shrink: 0;
-            position: sticky;
-            top: 0;
-            z-index: 50;
-        }
-
-        .nav-brand {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .nav-logo {
-            width: 38px;
-            height: 38px;
-            border-radius: 12px;
-            object-fit: cover;
-            border: 1px solid var(--border);
-            background: var(--avatar-bg);
-        }
-
-        .nav-logo-fallback {
-            width: 38px;
-            height: 38px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, #2563eb, #7c3aed);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            display: none;
-        }
-
-        .nav-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-primary);
-            letter-spacing: -0.01em;
-        }
-
-        .nav-sub {
-            font-size: 15px;
-            color: var(--text-primary);
-            margin-top: 1px;
-            font-weight: 600;
-            letter-spacing: -0.01em;
-        }
-
-        .nav-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .status-pill {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            padding: 4px 10px;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 100px;
-            font-size: 11px;
-            color: var(--text-secondary);
-            font-weight: 500;
-        }
-
-        .status-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: #22c55e;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .icon-btn {
-            width: 36px;
-            height: 36px;
-            border-radius: var(--radius-sm);
-            background: var(--surface);
-            border: 1px solid var(--border);
-            color: var(--text-secondary);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            transition: background 0.15s, border-color 0.15s, color 0.15s;
-        }
-
-        .icon-btn:hover {
-            background: var(--surface-2);
-            border-color: var(--border-strong);
-            color: var(--text-primary);
-        }
-
-        /* CHAT AREA */
-        #chat-container {
-            flex: 1;
-            overflow-y: auto;
-            padding: 24px 16px 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            scroll-behavior: smooth;
-        }
-
-        #chat-container::-webkit-scrollbar { width: 4px; }
-        #chat-container::-webkit-scrollbar-track { background: transparent; }
-        #chat-container::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
-
-        .msg-wrapper {
-            display: flex;
-            flex-direction: column;
-            max-width: 720px;
-            margin: 0 auto;
-            width: 100%;
-        }
-
-        .msg-row {
-            display: flex;
-            align-items: flex-end;
-            gap: 8px;
-        }
-
-        .msg-row.user { justify-content: flex-end; }
-        .msg-row.bot { justify-content: flex-start; }
-
-        .bot-avatar {
-            width: 30px;
-            height: 30px;
-            border-radius: 10px;
-            background: var(--avatar-bg);
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            border: 1px solid var(--border);
-            margin-bottom: 2px;
-        }
-
-        .bot-avatar img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        .bubble {
-            padding: 12px 16px;
-            font-size: 14.5px;
-            line-height: 1.65;
-            max-width: min(560px, 82%);
-            word-break: break-word;
-        }
-
-        .bubble.user {
-            background: var(--user-bg);
-            color: var(--user-text);
-            border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
-            font-weight: 400;
-        }
-
-        .bubble.bot {
-            background: var(--bot-bg);
-            color: var(--bot-text);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-sm);
-            box-shadow: var(--shadow-sm);
-        }
-
-        .msg-time {
-            font-size: 10.5px;
-            color: var(--text-tertiary);
-            margin-top: 4px;
-            padding: 0 4px;
-        }
-
-        .msg-row.user + .msg-time { text-align: right; }
-
-        /* TYPING INDICATOR */
-        .typing-bubble {
-            background: var(--bot-bg);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-sm);
-            padding: 14px 18px;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            box-shadow: var(--shadow-sm);
-        }
-
-        .typing-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--text-tertiary);
-            animation: typing 1.2s infinite;
-        }
-
-        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
-        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
-
-        @keyframes typing {
-            0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-            30% { transform: translateY(-5px); opacity: 1; }
-        }
-
-        /* DATE DIVIDER */
-        .date-divider {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            max-width: 720px;
-            margin: 12px auto;
-            width: 100%;
-        }
-
-        .date-divider::before,
-        .date-divider::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: var(--border);
-        }
-
-        .date-label {
-            font-size: 11px;
-            color: var(--text-tertiary);
-            font-weight: 500;
-            white-space: nowrap;
-        }
-
-        /* WELCOME CARD */
-        .welcome-card {
-            max-width: 720px;
-            margin: 8px auto 20px;
-            width: 100%;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-xl);
-            padding: 24px;
-            box-shadow: var(--shadow-md);
-        }
-
-        .welcome-icon {
-            width: 48px;
-            height: 48px;
-            border-radius: 16px;
-            background: var(--accent-light);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            margin-bottom: 14px;
-        }
-
-        .welcome-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: var(--text-primary);
-            letter-spacing: -0.02em;
-            margin-bottom: 6px;
-        }
-
-        .welcome-sub {
-            font-size: 13.5px;
-            color: var(--text-secondary);
-            line-height: 1.6;
-            margin-bottom: 18px;
-        }
-
-        .quick-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .quick-btn {
-            padding: 7px 13px;
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: 100px;
-            font-size: 12.5px;
-            color: var(--text-secondary);
-            cursor: pointer;
-            font-family: inherit;
-            transition: all 0.15s;
-            font-weight: 500;
-        }
-
-        .quick-btn:hover {
-            background: var(--accent-light);
-            border-color: var(--accent);
-            color: var(--accent-text);
-        }
-
-        /* INPUT AREA */
-        .input-area {
-            padding: 12px 16px 16px;
-            flex-shrink: 0;
-        }
-
-        .input-shell {
-            max-width: 720px;
-            margin: 0 auto;
-            background: var(--surface);
-            border: 1px solid var(--border-strong);
-            border-radius: var(--radius-xl);
-            box-shadow: var(--shadow-md);
-            overflow: hidden;
-            transition: border-color 0.15s, box-shadow 0.15s;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .input-shell:focus-within {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(37,99,235,0.1), var(--shadow-md);
-        }
-
-        .input-row {
-            display: flex;
-            align-items: flex-end;
-            gap: 8px;
-            padding: 10px 12px;
-        }
-
-        #message-input {
-            flex: 1;
-            background: transparent;
-            border: none;
-            outline: none;
-            font-size: 14.5px;
-            color: var(--text-primary);
-            font-family: 'IBM Plex Sans Thai', -apple-system, sans-serif;
-            resize: none;
-            max-height: 180px;
-            line-height: 1.6;
-            padding: 4px 0;
-        }
-
-        #message-input::placeholder { color: var(--text-tertiary); }
-
-        #send-btn {
-            width: 38px;
-            height: 38px;
-            border-radius: 12px;
-            background: var(--send-bg);
-            color: var(--send-text);
-            border: none;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-            transition: background 0.15s, transform 0.1s, opacity 0.15s;
-            font-size: 18px;
-        }
-
-        #send-btn:hover:not(:disabled) { background: var(--send-hover); }
-        #send-btn:active:not(:disabled) { transform: scale(0.94); }
-        #send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-
-        .input-footer {
-            padding: 0 12px 10px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .input-hint {
-            font-size: 11px;
-            color: var(--text-tertiary);
-        }
-
-        .char-count {
-            font-size: 11px;
-            color: var(--text-tertiary);
-            font-family: 'IBM Plex Mono', monospace;
-        }
-
-        .char-count.warn { color: #f59e0b; }
-
-        /* SCROLLED-UP INDICATOR */
-        #scroll-btn {
-            position: fixed;
-            bottom: 110px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 8px 16px;
-            background: var(--surface);
-            border: 1px solid var(--border-strong);
-            border-radius: 100px;
-            font-size: 12px;
-            color: var(--text-secondary);
-            cursor: pointer;
-            box-shadow: var(--shadow-md);
-            display: none;
-            font-family: inherit;
-            font-weight: 500;
-            z-index: 40;
-            transition: all 0.15s;
-        }
-
-        #scroll-btn:hover {
-            background: var(--surface-2);
-            color: var(--text-primary);
-        }
-
-        /* RESPONSIVE */
-        @media (max-width: 600px) {
-            nav { padding: 10px 14px; }
-            #chat-container { padding: 16px 10px 10px; }
-            .input-area { padding: 8px 10px 12px; }
-            .bubble { font-size: 14px; max-width: 90%; }
-            .status-pill { display: none; }
-            .welcome-card { border-radius: 18px; padding: 18px; }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+        .preview-layout { flex-direction: column; }
+        .preview-left { height: auto; }
+        @media (min-width: 1024px) {
+            .preview-layout { flex-direction: row; }
+            .preview-left { flex: 1; height: 100%; }
+            .preview-right { flex: 2; height: 100%; }
         }
     </style>
 </head>
-<body>
+<body class="bg-slate-50 flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden">
 
-    <nav>
-        <div class="nav-brand">
-            <img src="https://res.cloudinary.com/dyurfqm02/image/upload/v1782149273/%E0%B8%94%E0%B8%B5%E0%B9%84%E0%B8%8B%E0%B8%99%E0%B9%8C%E0%B8%97%E0%B8%B5%E0%B9%88%E0%B8%A2%E0%B8%B1%E0%B8%87%E0%B9%84%E0%B8%A1%E0%B9%88%E0%B9%84%E0%B8%94%E0%B9%89%E0%B8%95%E0%B8%B1%E0%B9%89%E0%B8%87%E0%B8%8A%E0%B8%B7%E0%B9%88%E0%B8%AD_d9aluf.png" alt="Logo" class="nav-logo" id="nav-logo-img">
+    <div class="lg:hidden bg-slate-900 text-white flex justify-between items-center p-4 sticky top-0 z-30 shadow-md flex-shrink-0">
+        <div class="font-bold text-lg">Admin Panel</div>
+        <button id="open-sidebar" class="text-white text-2xl focus:outline-none"><i class="fa-solid fa-bars"></i></button>
+    </div>
+    <div id="sidebar-backdrop" class="fixed inset-0 bg-slate-900/50 z-40 hidden lg:hidden backdrop-blur-sm transition-opacity"></div>
+
+    <?php include 'sidebar.php'; ?>
+
+    <main class="flex-1 flex flex-col min-w-0 bg-slate-50 relative lg:h-screen lg:overflow-hidden">
+        
+        <header class="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center z-10 flex-shrink-0 shadow-sm">
+            <h1 class="text-lg font-bold text-slate-800">
+                <i class="fa-solid fa-layer-group text-blue-500 mr-2"></i> จัดการเพจระบบงานภายใน
+            </h1>
             <div>
-                <div class="nav-sub">โรงเรียนวัดดงเมือง (เข่งฟื้นราษฎร์อุปถัมภ์)</div>
+                <?php if($status == 'success'): ?>
+                    <div id="alert-box" class="px-3 py-1.5 bg-green-50 text-green-600 border border-green-200 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1">
+                        <i class="fa-solid fa-check-circle"></i> บันทึกข้อมูลสำเร็จ
+                    </div>
+                <?php elseif($status == 'deleted'): ?>
+                    <div id="alert-box" class="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1">
+                        <i class="fa-solid fa-trash"></i> ลบข้อมูลเรียบร้อย
+                    </div>
+                <?php elseif($status == 'error_empty'): ?>
+                    <div id="alert-box" class="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1">
+                        <i class="fa-solid fa-circle-exclamation"></i> ข้อมูลไม่ครบถ้วน
+                    </div>
+                <?php endif; ?>
+            </div>
+        </header>
+
+        <div class="flex-1 p-4 md:p-5 flex flex-col overflow-y-auto lg:overflow-hidden min-h-0">
+            <div class="flex gap-5 flex-1 items-stretch min-w-0 preview-layout">
+                
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden flex-shrink-0 preview-left mb-5 lg:mb-0">
+                    <div class="px-4 py-3 border-b border-slate-100 bg-slate-50 font-bold text-sm text-slate-700 flex justify-between items-center flex-shrink-0">
+                        <span>
+                            <?php echo $edit_id ? '<i class="fa-solid fa-pen-to-square text-blue-500 mr-1"></i> แก้ไขระบบ' : '<i class="fa-solid fa-plus text-green-500 mr-1"></i> เพิ่มระบบใหม่'; ?>
+                        </span>
+                        <?php if($edit_id): ?>
+                            <a href="internal_systems_manage.php?page=<?php echo $page; ?>" class="text-xs text-slate-400 hover:text-red-500 font-bold">
+                                <i class="fa-solid fa-xmark"></i> ยกเลิก
+                            </a>
+                        <?php endif; ?>
+                    </div>
+
+                    <form action="internal_systems_action.php" method="POST" class="p-4 md:p-5 flex-1 overflow-y-auto custom-scroll flex flex-col gap-4 lg:max-h-[calc(100vh-160px)]">
+                        <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                        <?php if($edit_id): ?>
+                            <input type="hidden" name="id" value="<?php echo $edit_id; ?>">
+                        <?php endif; ?>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-600 mb-1.5">ชื่อระบบงาน *</label>
+                            <input type="text" name="title" value="<?php echo htmlspecialchars(stripslashes($edit_data['title'] ?? '')); ?>" required placeholder="เช่น ระบบบริหารงานบุคคล" class="w-full px-3 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 transition-colors">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-600 mb-1.5">ลิงก์ URL ปลายทาง *</label>
+                            <input type="text" name="link_url" value="<?php echo htmlspecialchars($edit_data['link_url'] ?? ''); ?>" required placeholder="เช่น admin/personnel_manage.php" class="w-full px-3 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 transition-colors">
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1.5">ไอคอน (Class เต็ม) *</label>
+                                <input type="text" name="icon_class" value="<?php echo htmlspecialchars($edit_data['icon_class'] ?? 'fa-solid fa-link'); ?>" required placeholder="เช่น fa-brands fa-line" class="w-full px-3 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 text-center transition-colors">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1.5">ธีมสีไอคอน (Pastel)</label>
+                                <select name="bg_color" class="w-full px-3 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 transition-colors">
+                                    <?php foreach($color_options as $val => $label): ?>
+                                        <option value="<?php echo $val; ?>" <?php echo ($edit_data['bg_color'] ?? '') == $val ? 'selected' : ''; ?>><?php echo $label; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1.5">ลำดับการจัดเรียง</label>
+                                <input type="number" name="sort_order" value="<?php echo htmlspecialchars($edit_data['sort_order'] ?? '0'); ?>" class="w-full px-3 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 text-center transition-colors">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1.5">สถานะการใช้งาน</label>
+                                <select name="is_active" class="w-full px-3 py-2 bg-slate-50 focus:bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 transition-colors">
+                                    <option value="1" <?php echo ($edit_data['is_active'] ?? '1') == 1 ? 'selected' : ''; ?>>เปิดใช้งาน ✅</option>
+                                    <option value="0" <?php echo ($edit_data['is_active'] ?? '1') == 0 ? 'selected' : ''; ?>>ปิดใช้งาน ❌</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="pt-3 mt-auto border-t border-slate-100 flex-shrink-0">
+                            <button type="submit" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 active:scale-95">
+                                <i class="fa-solid fa-save"></i> บันทึกข้อมูลระบบ
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden preview-right w-full">
+                    <div class="px-5 py-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center flex-shrink-0 font-bold text-sm text-slate-700">
+                        <span>รายการระบบงานภายใน (แสดงหน้าละ 5 รายการ)</span>
+                        <a href="../internal_systems.php" target="_blank" class="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 transition-colors">
+                            <i class="fa-solid fa-eye"></i> ดูหน้าเว็บจริง
+                        </a>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto custom-scroll p-4 space-y-3 bg-slate-50/40">
+                        <?php if($sys_list->num_rows == 0): ?>
+                            <div class="text-center py-10 text-slate-400">ยังไม่มีการบันทึกข้อมูลระบบงาน</div>
+                        <?php else: ?>
+                            <?php while($row = $sys_list->fetch_assoc()): 
+                                // ดึงชื่อคลาสไอคอนมาตรวจสอบ
+                                $raw_icon_class = htmlspecialchars($row['icon_class']);
+                                
+                                // หากข้อมูลเดิมไม่มีการระบุ Prefix (เช่น fa-solid, fa-brands) ให้เติม fa-solid อัตโนมัติเพื่อป้องกันไอคอนเก่าหาย
+                                if (!preg_match('/^(fa-solid|fa-regular|fa-brands|fas|far|fab)\s/', $raw_icon_class)) {
+                                    $display_icon_class = 'fa-solid ' . $raw_icon_class;
+                                } else {
+                                    $display_icon_class = $raw_icon_class;
+                                }
+                            ?>
+                                <div class="bg-white border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between hover:border-blue-300 hover:shadow-md transition-all group">
+                                    <div class="flex items-center gap-4 flex-1 min-w-0 w-full">
+                                        <div class="w-12 h-12 <?php echo htmlspecialchars($row['bg_color']); ?> rounded-xl flex items-center justify-center text-xl flex-shrink-0 shadow-sm">
+                                            <i class="<?php echo $display_icon_class; ?>"></i>
+                                        </div>
+                                        <div class="min-w-0 flex-1">
+                                            <h4 class="font-bold text-slate-800 text-base mb-1 truncate">
+                                                <?php echo htmlspecialchars(stripslashes($row['title'])); ?>
+                                            </h4>
+                                            <p class="text-xs text-slate-400 font-medium truncate">
+                                                <i class="fa-solid fa-link mr-1"></i> <?php echo htmlspecialchars($row['link_url']); ?>
+                                            </p>
+                                            <div class="flex gap-2 mt-1.5">
+                                                <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-slate-100 text-slate-500 border border-slate-200">
+                                                    ลำดับ: <?php echo htmlspecialchars($row['sort_order']); ?>
+                                                </span>
+                                                <?php if($row['is_active'] == 1): ?>
+                                                    <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-green-50 text-green-600 border border-green-100">เปิดใช้งานอยู่</span>
+                                                <?php else: ?>
+                                                    <span class="px-2 py-0.5 text-[9px] font-bold rounded bg-red-50 text-red-600 border border-red-100">ปิดใช้งาน</span>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flex gap-2 w-full sm:w-auto flex-shrink-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100 justify-end items-center sm:pl-3 sm:border-l">
+                                        <a href="internal_systems_manage.php?edit=<?php echo $row['id']; ?>&page=<?php echo $page; ?>" class="flex-1 sm:w-10 h-9 bg-slate-50 hover:bg-blue-500 border border-slate-200 hover:border-blue-600 text-slate-600 hover:text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center shadow-sm">
+                                            <i class="fa-solid fa-edit"></i> <span class="sm:hidden ml-1">แก้ไข</span>
+                                        </a>
+                                        <a href="internal_systems_action.php?delete=<?php echo $row['id']; ?>&csrf_token=<?php echo $csrf_token; ?>" onclick="return confirm('ยืนยันที่จะลบข้อมูลนี้ใช่หรือไม่?');" class="flex-1 sm:w-10 h-9 bg-red-50 hover:bg-red-600 border border-red-200 hover:border-red-700 text-red-600 hover:text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center shadow-sm">
+                                            <i class="fa-solid fa-trash-can"></i> <span class="sm:hidden ml-1">ลบ</span>
+                                        </a>
+                                    </div>
+                                </div>
+                            <?php endwhile; ?>
+                        <?php endif; ?>
+                    </div>
+
+                    <?php if($total_pages > 1): ?>
+                        <div class="px-5 py-3 border-t border-slate-200 bg-slate-50 flex justify-center items-center gap-1.5 flex-wrap flex-shrink-0">
+                            <?php if($page > 1): ?>
+                                <a href="?page=<?php echo $page - 1; ?><?php echo $edit_id ? '&edit='.$edit_id : ''; ?>" class="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 text-xs transition-all shadow-sm">
+                                    <i class="fa-solid fa-chevron-left"></i>
+                                </a>
+                            <?php endif; ?>
+
+                            <?php for($i=1; $i<=$total_pages; $i++): ?>
+                                <a href="?page=<?php echo $i; ?><?php echo $edit_id ? '&edit='.$edit_id : ''; ?>" class="w-8 h-8 flex items-center justify-center rounded-xl font-bold text-xs transition-all <?php echo ($i == $page) ? 'bg-blue-600 text-white shadow-sm scale-105' : 'bg-white text-slate-600 border border-slate-200 hover:bg-blue-50 hover:text-blue-600'; ?>">
+                                    <?php echo $i; ?>
+                                </a>
+                            <?php endfor; ?>
+
+                            <?php if($page < $total_pages): ?>
+                                <a href="?page=<?php echo $page + 1; ?><?php echo $edit_id ? '&edit='.$edit_id : ''; ?>" class="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 text-xs transition-all shadow-sm">
+                                    <i class="fa-solid fa-chevron-right"></i>
+                                </a>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
+
+                </div>
             </div>
         </div>
-        <div class="nav-actions">
-            <div class="status-pill">
-                <span class="status-dot"></span>
-                <span>ออนไลน์</span>
-            </div>
-            <button class="icon-btn" id="dark-toggle" aria-label="สลับธีม" title="สลับ Dark / Light Mode">
-                <span id="theme-icon">🌙</span>
-            </button>
-        </div>
-    </nav>
-
-    <div id="chat-container" role="log" aria-live="polite" aria-label="บทสนทนา">
-        <div class="welcome-card">
-            <div class="welcome-icon">✨</div>
-            <div class="welcome-title">สวัสดีครับ! ผม AI Assistant "น้องดงเมือง"</div>
-            <div class="welcome-sub">ถามอะไรก็ได้เลยครับ ยินดีช่วยเสมอ</div>  
-        </div>
-
-        <div class="date-divider">
-            <span class="date-label" id="today-label"></span>
-        </div>
-    </div>
-
-    <button id="scroll-btn" aria-label="เลื่อนไปล่างสุด">↓ ข้อความใหม่</button>
-
-    <div class="input-area">
-        <div class="input-shell">
-            <div class="input-row">
-                <textarea id="message-input" rows="1" placeholder="พิมพ์ข้อความที่นี่..." aria-label="ข้อความ"></textarea>
-                <button id="send-btn" aria-label="ส่งข้อความ" disabled>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                    </svg>
-                </button>
-            </div>
-            <div class="input-footer">
-                <span class="input-hint">Enter ส่ง · Shift+Enter ขึ้นบรรทัดใหม่</span>
-                <span class="char-count" id="char-count">0</span>
-            </div>
-        </div>
-    </div>
+    </main>
 
     <script>
-        const WORKER_URL = 'https://wdms-ai-api.phitsanuwong-sri2862.workers.dev';
-        const chatContainer = document.getElementById('chat-container');
-        const messageInput = document.getElementById('message-input');
-        const sendBtn = document.getElementById('send-btn');
-        const charCount = document.getElementById('char-count');
-        const scrollBtn = document.getElementById('scroll-btn');
-        const LOGO_URL = 'https://res.cloudinary.com/dyurfqm02/image/upload/v1782149273/%E0%B8%94%E0%B8%B5%E0%B9%84%E0%B8%8B%E0%B8%99%E0%B9%8C%E0%B8%97%E0%B8%B5%E0%B9%88%E0%B8%A2%E0%B8%B1%E0%B8%87%E0%B9%84%E0%B8%A1%E0%B9%88%E0%B9%84%E0%B8%94%E0%B9%89%E0%B8%95%E0%B8%B1%E0%B9%89%E0%B8%87%E0%B8%8A%E0%B8%B7%E0%B9%88%E0%B8%AD_d9aluf.png';
-        const FALLBACK_LOGO_URL = 'https://res.cloudinary.com/dyurfqm02/image/upload/v1782211024/%E0%B8%A3%E0%B8%A3._fmaahp.png';
-        let isLoading = false;
-
-        /* DATE LABEL */
-        const today = new Date();
-        const thMonths = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
-        document.getElementById('today-label').textContent =
-            `วันที่ ${today.getDate()} ${thMonths[today.getMonth()]} ${today.getFullYear() + 543}`;
-
-        /* DARK MODE */
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark');
-            document.getElementById('theme-icon').textContent = '☀️';
+        // ควบคุมกล่องแจ้งเตือน (Alert Box) ให้ค่อยๆ จางหายไป
+        const alertBox = document.getElementById('alert-box');
+        if(alertBox) {
+            setTimeout(() => { 
+                alertBox.style.opacity = '0'; 
+                alertBox.style.transition = 'opacity 0.5s ease';
+                setTimeout(() => alertBox.remove(), 500); 
+            }, 3000);
         }
 
-        document.getElementById('dark-toggle').addEventListener('click', () => {
-            const isDark = document.documentElement.classList.toggle('dark');
-            document.getElementById('theme-icon').textContent = isDark ? '☀️' : '🌙';
-            localStorage.setItem('theme', isDark ? 'dark' : 'light');
-        });
-
-        /* AUTO-RESIZE TEXTAREA */
-        messageInput.addEventListener('input', () => {
-            messageInput.style.height = 'auto';
-            messageInput.style.height = Math.min(messageInput.scrollHeight, 160) + 'px';
-            const len = messageInput.value.length;
-            charCount.textContent = len;
-            charCount.classList.toggle('warn', len > 800);
-            sendBtn.disabled = len === 0 || isLoading;
-        });
-
-        /* SCROLL BUTTON */
-        chatContainer.addEventListener('scroll', () => {
-            const nearBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 80;
-            scrollBtn.style.display = nearBottom ? 'none' : 'block';
-        });
-        scrollBtn.addEventListener('click', scrollToBottom);
-
-        function scrollToBottom() {
-            chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' });
-        }
-
-        function getTime() {
-            return today.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-        }
-
-        function appendMessage(role, text) {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'msg-wrapper';
-
-            const row = document.createElement('div');
-            row.className = `msg-row ${role}`;
-
-            if (role === 'bot') {
-                const avatar = document.createElement('div');
-                avatar.className = 'bot-avatar';
-                const img = document.createElement('img');
-                img.src = LOGO_URL;
-                img.alt = 'AI';
-                img.onerror = () => { img.src = FALLBACK_LOGO_URL; img.onerror = null; };
-                avatar.appendChild(img);
-                row.appendChild(avatar);
-            }
-
-            const bubble = document.createElement('div');
-            bubble.className = `bubble ${role}`;
-            bubble.textContent = text;
-            row.appendChild(bubble);
-            wrapper.appendChild(row);
-
-            const time = document.createElement('div');
-            time.className = 'msg-time';
-            time.style.textAlign = role === 'user' ? 'right' : 'left';
-            time.textContent = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-            if (role === 'user') time.style.paddingRight = '4px';
-            wrapper.appendChild(time);
-
-            chatContainer.appendChild(wrapper);
-            scrollToBottom();
-            return bubble;
-        }
-
-        function showTyping() {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'msg-wrapper';
-            wrapper.id = 'typing-indicator';
-
-            const row = document.createElement('div');
-            row.className = 'msg-row bot';
-
-            const avatar = document.createElement('div');
-            avatar.className = 'bot-avatar';
-            const img = document.createElement('img');
-            img.src = LOGO_URL;
-            img.alt = '';
-            img.onerror = () => { img.src = FALLBACK_LOGO_URL; img.onerror = null; };
-            avatar.appendChild(img);
-            row.appendChild(avatar);
-
-            const typing = document.createElement('div');
-            typing.className = 'typing-bubble';
-            [1,2,3].forEach(() => {
-                const dot = document.createElement('div');
-                dot.className = 'typing-dot';
-                typing.appendChild(dot);
+        // ควบคุม Sidebar บนมือถือ
+        const btnOpen = document.getElementById('open-sidebar');
+        const sidebar = document.getElementById('sidebar');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        
+        if (btnOpen && sidebar && backdrop) {
+            btnOpen.addEventListener('click', () => { 
+                sidebar.classList.remove('-translate-x-full'); 
+                backdrop.classList.remove('hidden'); 
             });
-
-            row.appendChild(typing);
-            wrapper.appendChild(row);
-            chatContainer.appendChild(wrapper);
-            scrollToBottom();
+            backdrop.addEventListener('click', () => { 
+                sidebar.classList.add('-translate-x-full'); 
+                backdrop.classList.add('hidden'); 
+            });
         }
-
-        function removeTyping() {
-            const el = document.getElementById('typing-indicator');
-            if (el) el.remove();
-        }
-
-        async function sendMessage() {
-            const text = messageInput.value.trim();
-            if (!text || isLoading) return;
-
-            isLoading = true;
-            sendBtn.disabled = true;
-            appendMessage('user', text);
-            messageInput.value = '';
-            messageInput.style.height = 'auto';
-            charCount.textContent = '0';
-            showTyping();
-
-            try {
-                const res = await fetch(WORKER_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ messages: [{ role: 'user', content: text }] })
-                });
-                const data = await res.json();
-                removeTyping();
-                const reply = data?.choices?.[0]?.message?.content || 'ขออภัยครับ ไม่ได้รับข้อมูลจากเซิร์ฟเวอร์';
-                appendMessage('bot', reply);
-            } catch (e) {
-                removeTyping();
-                appendMessage('bot', '⚠️ เชื่อมต่อไม่ได้ในขณะนี้ กรุณาลองใหม่อีกครั้งครับ');
-            } finally {
-                isLoading = false;
-                sendBtn.disabled = messageInput.value.trim().length === 0;
-            }
-        }
-
-        function quickSend(text) {
-            messageInput.value = text;
-            messageInput.dispatchEvent(new Event('input'));
-            sendMessage();
-        }
-
-        sendBtn.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-        });
     </script>
 </body>
 </html>
