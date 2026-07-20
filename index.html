@@ -708,17 +708,21 @@
             showTyping();
 
             try {
+                // แก้ไขจุดที่ 1: เปลี่ยนรูปแบบการส่ง body
                 const res = await fetch(WORKER_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ messages: [{ role: 'user', content: text }] })
+                    body: JSON.stringify({ message: text }) 
                 });
                 const data = await res.json();
                 removeTyping();
-                const reply = data?.choices?.[0]?.message?.content || 'ขออภัยครับ ไม่ได้รับข้อมูลจากเซิร์ฟเวอร์';
+                
+                // แก้ไขจุดที่ 2: เปลี่ยนวิธีการรับคำตอบจาก data.reply
+                const reply = data.reply || data.error || 'ขออภัยครับ ไม่ได้รับข้อมูลจากเซิร์ฟเวอร์';
                 appendMessage('bot', reply);
             } catch (e) {
                 removeTyping();
+                console.error("Error connecting to worker:", e);
                 appendMessage('bot', '⚠️ เชื่อมต่อไม่ได้ในขณะนี้ กรุณาลองใหม่อีกครั้งครับ');
             } finally {
                 isLoading = false;
