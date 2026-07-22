@@ -561,6 +561,11 @@
                     </svg>
                 </button>
             </div>
+            
+            <div class="input-footer">
+                <span class="input-hint">Shift + Enter เพื่อขึ้นบรรทัดใหม่</span>
+                <div class="char-count"><span id="char-count">0</span> / 800</div>
+            </div>
         </div>
     </div>
 
@@ -599,8 +604,12 @@
             messageInput.style.height = 'auto';
             messageInput.style.height = Math.min(messageInput.scrollHeight, 160) + 'px';
             const len = messageInput.value.length;
-            charCount.textContent = len;
-            charCount.classList.toggle('warn', len > 800);
+            
+            if (charCount) {
+                charCount.textContent = len;
+                charCount.parentElement.classList.toggle('warn', len > 800);
+            }
+            
             sendBtn.disabled = len === 0 || isLoading;
         });
 
@@ -700,7 +709,7 @@
             appendMessage('user', text);
             messageInput.value = '';
             messageInput.style.height = 'auto';
-            charCount.textContent = '0';
+            if (charCount) charCount.textContent = '0';
             showTyping();
 
             try {
